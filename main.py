@@ -16,7 +16,7 @@ def get_allowed_network():
 ALLOWED_NETWORK = get_allowed_network()
 
 def run_pull(image: str):
-    if os.path.exists('/host/nix/var/nix/profiles/system/sw/bin'):
+    if os.path.exists('/host/nix'):
         subprocess.run(['chroot', '/host', '/nix/var/nix/profiles/system/sw/bin/ctr', 'image', 'pull', image])
     else:
         subprocess.run(['chroot', '/host', '/usr/bin/ctr', 'image', 'pull', image])
