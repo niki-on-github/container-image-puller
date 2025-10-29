@@ -11,17 +11,20 @@ def get_allowed_network():
     try:
         return ipaddress.ip_network(env_cidr)
     except ValueError:
-        return ipaddress.ip_network("10.42.0.0/24")
+        return None
 
 ALLOWED_NETWORK = get_allowed_network()
 
 def run_pull(image: str):
-    subprocess.run(['chroot', '/host', '/nix/var/nix/profiles/system/sw/bin/ctr', 'image', 'pull', image])
+    if os.path.exists('/host/nix/var/nix/profiles/system/sw/bin'):
+        subprocess.run(['chroot', '/host', '/nix/var/nix/profiles/system/sw/bin/ctr', 'image', 'pull', image])
+    else:
+        subprocess.run(['chroot', '/host', '/usr/bin/ctr', 'image', 'pull', image])
 
 def is_allowed_ip(remote_ip: str) -> bool:
     try:
         ip = ipaddress.ip_address(remote_ip)
-        return ip in ALLOWED_NETWORK
+        return ALLOWED_NETWORK is not None and ip in ALLOWED_NETWORK
     except ValueError:
         return False
 
