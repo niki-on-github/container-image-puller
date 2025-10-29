@@ -24,7 +24,7 @@ spec:
       hostIPC: true
       containers:
       - name: ${APP_NAME}
-        image: ghcr.io/niki-on-github/container-image-puller:v0.0.1
+        image: ghcr.io/niki-on-github/container-image-puller:v0.0.3
         securityContext:
           privileged: true
         volumeMounts:
