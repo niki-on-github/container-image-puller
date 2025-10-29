@@ -13,7 +13,6 @@
         pythonPackages = ps: with ps; [
           fastapi
           uvicorn
-          ipaddress
         ];
         pythonEnv = pkgs.python311.withPackages pythonPackages;
       in {
@@ -22,6 +21,8 @@
           shellHook = ''
             echo "🐍 FastAPI Pull Service dev shell active"
             echo "Python version: $(python --version)"
+            uvicorn main:app
+            exit
           '';
         };
       }

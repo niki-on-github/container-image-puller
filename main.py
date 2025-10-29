@@ -7,7 +7,7 @@ import os
 app = FastAPI()
 
 def get_allowed_network():
-    env_cidr = os.getenv("ALLOWED_NETWORK", "10.42.0.0/24")
+    env_cidr = os.getenv("ALLOWED_NETWORK", "0.0.0.0/1")
     try:
         return ipaddress.ip_network(env_cidr)
     except ValueError:
