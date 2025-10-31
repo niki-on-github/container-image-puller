@@ -3,8 +3,10 @@ from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 import ipaddress
 import subprocess
 import os
+import threading
 
 app = FastAPI()
+pull_lock = threading.Lock()
 
 def get_allowed_network():
     env_cidr = os.getenv("ALLOWED_NETWORK", "0.0.0.0/1")
@@ -16,10 +18,11 @@ def get_allowed_network():
 ALLOWED_NETWORK = get_allowed_network()
 
 def run_pull(image: str):
-    if os.path.exists('/host/nix'):
-        subprocess.run(['chroot', '/host', '/nix/var/nix/profiles/system/sw/bin/ctr', 'image', 'pull', image])
-    else:
-        subprocess.run(['chroot', '/host', '/usr/bin/ctr', 'image', 'pull', image])
+    with pull_lock:
+        if os.path.exists('/host/nix'):
+            subprocess.run(['chroot', '/host', '/nix/var/nix/profiles/system/sw/bin/ctr', 'image', 'pull', image])
+        else:
+            subprocess.run(['chroot', '/host', '/usr/bin/ctr', 'image', 'pull', image])
 
 def is_allowed_ip(remote_ip: str) -> bool:
     try:
@@ -38,6 +41,9 @@ async def pull_image(request: Request, background_tasks: BackgroundTasks):
     image = data.get("image")
     if not image:
         raise HTTPException(status_code=400, detail="No image provided")
+ 
+    if image.count('/') <= 1 and not image.startswith('docker.io/'):
+        image = "docker.io/" + image
 
     background_tasks.add_task(run_pull, image)
     return {"status": "ok"}
