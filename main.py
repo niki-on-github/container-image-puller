@@ -4,6 +4,7 @@ import ipaddress
 import subprocess
 import os
 import threading
+import shutil
 
 app = FastAPI()
 pull_lock = threading.Lock()
@@ -19,10 +20,13 @@ ALLOWED_NETWORK = get_allowed_network()
 
 def run_pull(image: str):
     with pull_lock:
-        if os.path.exists('/host/nix'):
-            subprocess.run(['chroot', '/host', '/nix/var/nix/profiles/system/sw/bin/ctr', 'image', 'pull', image])
+        if shutil.disk_usage('/host').free / (1024 ** 3) > 50:
+            if os.path.exists('/host/nix'):
+                subprocess.run(['chroot', '/host', '/nix/var/nix/profiles/system/sw/bin/ctr', 'image', 'pull', image])
+            else:
+                subprocess.run(['chroot', '/host', '/usr/bin/ctr', 'image', 'pull', image])
         else:
-            subprocess.run(['chroot', '/host', '/usr/bin/ctr', 'image', 'pull', image])
+            print("Insufficient storage available")
 
 def is_allowed_ip(remote_ip: str) -> bool:
     try:
