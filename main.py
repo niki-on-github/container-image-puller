@@ -22,9 +22,9 @@ def run_pull(image: str):
     with pull_lock:
         if shutil.disk_usage('/host').free / (1024 ** 3) > 50:
             if os.path.exists('/host/nix'):
-                subprocess.run(['chroot', '/host', '/nix/var/nix/profiles/system/sw/bin/ctr', 'image', 'pull', image])
+                subprocess.run(['chroot', '/host', '/nix/var/nix/profiles/system/sw/bin/crictl', 'pull', image])
             else:
-                subprocess.run(['chroot', '/host', '/usr/bin/ctr', 'image', 'pull', image])
+                subprocess.run(['chroot', '/host', '/usr/bin/crictr', 'pull', image])
         else:
             print("Insufficient storage available")
 
