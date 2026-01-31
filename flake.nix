@@ -13,6 +13,7 @@
         pythonPackages = ps: with ps; [
           fastapi
           uvicorn
+          apscheduler
         ];
         pythonEnv = pkgs.python311.withPackages pythonPackages;
       in {

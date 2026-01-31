@@ -9,9 +9,15 @@ import shutil
 import json
 import logging
 from datetime import datetime, timezone
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 
 # Configure debug mode via environment variable
 DEBUG_MODE = os.getenv("DEBUG", "false").lower() in ("true", "1", "yes")
+
+# Configure pruning schedule via environment variable
+PRUNE_SCHEDULE = os.getenv("PRUNE_SCHEDULE", "")
+PRUNE_DAYS = int(os.getenv("PRUNE_DAYS", "14"))
 
 # Configure console logging
 console_handler = logging.StreamHandler()
@@ -73,10 +79,51 @@ def get_allowed_network():
 
 ALLOWED_NETWORK = get_allowed_network()
 
+# Initialize scheduler
+scheduler = BackgroundScheduler(timezone=timezone.utc)
+
+def run_prune_job():
+    """
+    Wrapper function for scheduled prune operations.
+    Uses the configured PRUNE_DAYS threshold.
+    """
+    logger.info(f"Scheduled prune operation started (days threshold: {PRUNE_DAYS})")
+    run_prune(days=PRUNE_DAYS)
+
+async def configure_scheduler():
+    """
+    Configure the APIScheduler with cron job if PRUNE_SCHEDULE is set.
+    """
+    if PRUNE_SCHEDULE:
+        try:
+            trigger = CronTrigger.from_crontab(PRUNE_SCHEDULE)
+            scheduler.add_job(
+                run_prune_job,
+                trigger=trigger,
+                id="image_prune_job",
+                replace_existing=True
+            )
+            logger.info(f"Cron scheduler configured successfully with expression: {PRUNE_SCHEDULE}")
+            scheduler.start()
+            logger.info("Image prune scheduler started")
+        except Exception as e:
+            logger.error(f"Failed to configure scheduler with cron expression '{PRUNE_SCHEDULE}': {str(e)}")
+            logger.warning("Prune scheduler will not run; manual operation only")
+
+def cleanup_scheduler():
+    """
+    Cleanup scheduler resources on shutdown.
+    """
+    if scheduler.running:
+        scheduler.remove_all_jobs()
+        scheduler.shutdown(wait=True)
+        logger.info("Image prune scheduler stopped")
+
 # Log startup
 logger.info("Image puller service started")
 logger.info(f"Allowed network configured: {ALLOWED_NETWORK}")
 logger.info(f"Container detection: {IN_CONTAINER}")
+logger.info(f"Prune schedule configured: {PRUNE_SCHEDULE or 'Disabled'}")
 
 def run_pull(image: str):
     logger.debug(f"Lock acquired for pull operation on image: {image}")
@@ -257,6 +304,22 @@ def run_prune(days: int = 14):
                 images_pruned += 1
 
     logger.info(f"Pruning operation completed. Removed {images_pruned} images, {errors} errors")
+
+@app.on_event("startup")
+async def startup_event():
+    """
+    Handle application startup events.
+    """
+    await configure_scheduler()
+    logger.info("Application startup complete")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """
+    Handle application shutdown events.
+    """
+    cleanup_scheduler()
+    logger.info("Application shutdown complete")
 
 # Configure FastAPI app
 app = FastAPI(
