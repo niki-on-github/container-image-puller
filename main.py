@@ -305,6 +305,15 @@ def run_prune(days: int = 14):
 
     logger.info(f"Pruning operation completed. Removed {images_pruned} images, {errors} errors")
 
+# Configure FastAPI app
+app = FastAPI(
+    title="Container Image Puller Service",
+    description="Service for pulling and pruning container images",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc"
+)
+
 @app.on_event("startup")
 async def startup_event():
     """
@@ -320,15 +329,6 @@ async def shutdown_event():
     """
     cleanup_scheduler()
     logger.info("Application shutdown complete")
-
-# Configure FastAPI app
-app = FastAPI(
-    title="Container Image Puller Service",
-    description="Service for pulling and pruning container images",
-    version="1.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc"
-)
 
 @app.post("/pull-image")
 async def pull_image(request: Request, background_tasks: BackgroundTasks):
