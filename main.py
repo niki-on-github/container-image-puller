@@ -24,6 +24,40 @@ logger.addHandler(console_handler)
 # Define image lock
 image_lock = threading.Lock()
 
+def is_container() -> bool:
+    """
+    Detect if running inside a container using multiple methods.
+    Returns True if inside a container, False otherwise.
+    """
+    # Method 1: Check /proc/1/cgroup for container markers
+    try:
+        with open('/proc/1/cgroup', 'r') as f:
+            cgroup_content = f.read()
+            # Check for common container markers
+            if 'docker' in cgroup_content or 'kubepods' in cgroup_content or 'kublet' in cgroup_content:
+                return True
+    except (FileNotFoundError, IOError):
+        pass
+    
+    # Method 2: Check for .dockerenv file
+    if os.path.exists('/.dockerenv'):
+        return True
+    
+    # Method 3: Check Kubernetes environment variables
+    if os.environ.get('KUBERNETES_SERVICE_HOST'):
+        return True
+    
+    # Method 4: Check Docker environment variables
+    for env_var in os.environ.keys():
+        if env_var.startswith('DOCKER_') or env_var.startswith('containerd_'):
+            return True
+    
+    return False
+
+# Cache container detection result
+IN_CONTAINER = is_container()
+logger.info(f"Running in container: {IN_CONTAINER}")
+
 def get_allowed_network():
     env_cidr = os.getenv("ALLOWED_NETWORK", "0.0.0.0/1")
     try:
@@ -36,17 +70,16 @@ ALLOWED_NETWORK = get_allowed_network()
 # Log startup
 logger.info("Image puller service started")
 logger.info(f"Allowed network configured: {ALLOWED_NETWORK}")
+logger.info(f"Container detection: {IN_CONTAINER}")
 
 def run_pull(image: str):
     logger.debug(f"Lock acquired for pull operation on image: {image}")
     with image_lock:
-        logger.debug(f"Pull operation started for image: {image}")
+        logger.debug(f"Lock acquired for pull operation on image: {image}")
         try:
-            if shutil.disk_usage('/host').free / (1024 ** 3) > 50:
-                if os.path.exists('/host/nix'):
-                    result = subprocess.run(['chroot', '/host', '/nix/var/nix/profiles/system/sw/bin/crictl', 'pull', image], timeout=30*60)
-                else:
-                    result = subprocess.run(['chroot', '/host', '/usr/bin/crictl', 'pull', image], timeout=30*60)
+            disk_path = '/host' if IN_CONTAINER else '/'
+            if shutil.disk_usage(disk_path).free / (1024 ** 3) > 50:
+                result = run_in_host(['pull', image])
                 
                 if result.returncode == 0:
                     logger.info(f"Successfully pulled image: {image}")
@@ -140,10 +173,16 @@ def run_in_host(cmd):
     Helper to run commands in /host chroot, picking the right crictl binary.
     cmd is a list starting with the tool name, e.g. ['crictl', 'pull', image]
     """
-    if os.path.exists('/host/nix'):
-        full_cmd = ['chroot', '/host', '/nix/var/nix/profiles/system/sw/bin/crictl'] + cmd
+    if IN_CONTAINER:
+        if os.path.exists('/host/nix'):
+            full_cmd = ['chroot', '/host', '/nix/var/nix/profiles/system/sw/bin/crictl'] + cmd
+        else:
+            full_cmd = ['chroot', '/host', '/usr/bin/crictl'] + cmd
     else:
-        full_cmd = ['chroot', '/host', '/usr/bin/crictl'] + cmd
+        if os.path.exists('/nix/var/nix/profiles/system/sw/bin/crictl'):
+            full_cmd = ['/nix/var/nix/profiles/system/sw/bin/crictl'] + cmd
+        else:
+            full_cmd = ['/usr/bin/crictl'] + cmd
     try:
         result = subprocess.run(full_cmd, check=False, capture_output=True, text=True)
         logger.debug(f"Command completed with return code {result.returncode}")
