@@ -10,15 +10,21 @@ import json
 import logging
 from datetime import datetime, timezone
 
+# Configure debug mode via environment variable
+DEBUG_MODE = os.getenv("DEBUG", "false").lower() in ("true", "1", "yes")
+
 # Configure console logging
 console_handler = logging.StreamHandler()
-console_handler.setFormatter(logging.Formatter(
-    '%(levelname)s - %(message)s'
-))
+if DEBUG_MODE:
+    console_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    console_handler.setLevel(logging.DEBUG)
+else:
+    console_handler.setFormatter(logging.Formatter('%(levelname)s - %(message)s'))
+    console_handler.setLevel(logging.INFO)
 
 # Configure logger
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.DEBUG if DEBUG_MODE else logging.INFO)
 logger.addHandler(console_handler)
 
 # Define image lock
@@ -83,6 +89,10 @@ def run_pull(image: str):
                 
                 if result.returncode == 0:
                     logger.info(f"Successfully pulled image: {image}")
+                    # Try to get image creation time for logging
+                    created_time = get_image_created(image)
+                    if created_time:
+                        logger.info(f"  Image creation time: {created_time.isoformat()}")
                 else:
                     logger.error(f"Failed to pull image {image}: Command returned code {result.returncode}, stderr: {result.stderr}")
             else:
@@ -122,26 +132,33 @@ def get_used_images() -> set[str]:
 
     ids = ps.stdout.strip().splitlines()
     if not ids:
+        logger.debug("No running containers found")
         return set()
 
     used = set()
     for cid in ids:
+        logger.debug(f"Checking container ID: {cid}")
         insp = run_in_host(['inspect', cid])
         if insp.returncode != 0:
+            logger.debug(f"Failed to inspect container {cid}")
             continue
         obj = json.loads(insp.stdout)
         ref = obj.get("status", {}).get("imageRef")
         if ref:
+            logger.debug(f"Container {cid} uses image: {ref}")
             used.add(ref)
     logger.info(f"Identified {len(used)} used images")
     return used
 
 def get_all_images() -> list[str]:
+    logger.debug("Fetching list of all images")
     img = run_in_host(['images', '-q'])
     if img.returncode != 0:
         logger.error(f"crictl images failed: {img.stderr}")
         return []
-    return img.stdout.strip().splitlines()
+    image_list = img.stdout.strip().splitlines()
+    logger.debug(f"Found {len(image_list)} images to check: {', '.join(image_list[:10])}{'...' if len(image_list) > 10 else ''}")
+    return image_list
 
 def get_image_created(img_id: str) -> datetime | None:
     """
@@ -192,7 +209,7 @@ def run_in_host(cmd):
             logger.debug(f"Command stdout: {result.stdout}")
         return result
     except Exception as e:
-        logger.error(f"Error executing command {' '.join(cmd)}: {str(e)}")
+        logger.debug(f"Error executing command {' '.join(cmd)}: {str(e)}")
         raise RuntimeError(f"Command execution failed: {str(e)}")
 
 def run_prune(days: int = 14):
@@ -223,20 +240,20 @@ def run_prune(days: int = 14):
 
             age_seconds = (now - created_dt).total_seconds()
             if age_seconds < cutoff_seconds:
-                logger.debug(f"Image {img} is too new ({age_seconds/86400:.1f} days < {days} days), skipping")
+                logger.debug(f"Skipping image: {img}, reason: too new ({age_seconds/86400:.1f} days < {days} days)")
                 continue
 
             if img in used_images:
-                logger.debug(f"Skipping used image: {img}")
+                logger.debug(f"Skipping image: {img}, reason: in use by running container")
                 continue
 
-            logger.debug(f"Attempting to prune image {img}, age={age_seconds/86400:.1f} days")
+            logger.debug(f"Attempting to prune image: {img}, age={age_seconds/86400:.1f} days, created={created_dt.isoformat()}")
             r = run_in_host(['rmi', img])
             if r.returncode != 0:
                 logger.error(f"Failed to remove image {img}: Command returned code {r.returncode}, stderr: {r.stderr}")
                 errors += 1
             else:
-                logger.info(f"Successfully pruned image: {img}")
+                logger.info(f"Successfully pruned image: {img}, created: {created_dt.isoformat()}")
                 images_pruned += 1
 
     logger.info(f"Pruning operation completed. Removed {images_pruned} images, {errors} errors")
