@@ -147,7 +147,7 @@ def get_image_created(img_id: str) -> datetime | None:
     """
     Return creation time from .info.imageSpec.created for an image, or None.
     """
-    insp = run_in_host(['inspect', img_id])
+    insp = run_in_host(['inspecti', img_id])
     if insp.returncode != 0:
         logger.error(f"Inspect failed for image {img_id}: {insp.stderr}")
         return None
@@ -287,18 +287,19 @@ async def prune_images(request: Request, background_tasks: BackgroundTasks):
         logger.warning(f"Blocked prune attempt from IP: {remote_ip}")
         raise HTTPException(status_code=403, detail="Forbidden")
 
+    days = 14
     try:
         data = await request.json()
+        if data:
+            days = data.get("days", 14)
+            try:
+                days = int(days)
+            except (TypeError, ValueError) as e:
+                logger.warning(f"Prune request failed - Invalid days value: {days} from IP: {remote_ip}: {str(e)}")
+                raise HTTPException(status_code=400, detail="Invalid days value")
     except Exception as e:
-        logger.warning(f"Prune request failed - JSON parsing error from IP: {remote_ip}: {str(e)}")
-        raise HTTPException(status_code=400, detail="Invalid JSON request")
-
-    days = data.get("days", 14)
-    try:
-        days = int(days)
-    except (TypeError, ValueError) as e:
-        logger.warning(f"Prune request failed - Invalid days value: {days} from IP: {remote_ip}: {str(e)}")
-        raise HTTPException(status_code=400, detail="Invalid days value")
+        logger.info(f"Prune request received without JSON body or with invalid JSON from IP: {remote_ip}")
+        days = 14
 
     logger.info(f"Starting prune operation with {days} days threshold from IP: {remote_ip}")
     try:
