@@ -52,15 +52,12 @@ def run_pull(image: str):
                     logger.info(f"Successfully pulled image: {image}")
                 else:
                     logger.error(f"Failed to pull image {image}: Command returned code {result.returncode}, stderr: {result.stderr}")
-                    print(f"Failed to pull image {image}: {result.stderr}")
             else:
                 logger.warning(f"Insufficient storage available for pulling image: {image}")
-                print("Insufficient storage available")
         except subprocess.TimeoutExpired:
             logger.error(f"Pull operation timed out for image: {image}, command was blocked after 30 minutes")
         except FileNotFoundError as e:
             logger.error(f"Required binary not found during pull for image {image}: {str(e)}")
-            print(f"Required binary not found: {str(e)}")
         except Exception as e:
             logger.error(f"Unexpected error during pull for {image}: {str(e)}\n{traceback.format_exc()}")
     logger.debug(f"Lock released after pull operation for image: {image}")
@@ -85,46 +82,31 @@ def get_used_images() -> set[str]:
     """
     Return a set of image references used by any container.
     """
-    # List containers
-    try:
-        ps = run_in_host(['ps', '-a', '-q'])
-        if ps.returncode != 0:
-            logger.error(f"crictl ps failed: {ps.stderr}")
-            print("crictl ps failed:", ps.stderr)
-            return set()
-    except RuntimeError as e:
-        logger.error(f"Failed to list containers: {str(e)}")
-        print(f"Failed to list containers: {str(e)}")
+    ps = run_in_host(['ps', '-a', '-q'])
+    if ps.returncode != 0:
+        logger.error(f"crictl ps failed: {ps.stderr}")
         return set()
 
     ids = ps.stdout.strip().splitlines()
     if not ids:
         return set()
 
-    # Inspect each container individually for robustness
     used = set()
     for cid in ids:
-        try:
-            insp = run_in_host(['inspect', cid])
-            if insp.returncode != 0:
-                continue
-            try:
-                obj = json.loads(insp.stdout)
-            except json.JSONDecodeError as e:
-                continue
-            ref = obj.get("status", {}).get("imageRef")
-            if ref:
-                used.add(ref)
-        except RuntimeError as e:
-            logger.warning(f"Failed to inspect container {cid}: {str(e)}")
+        insp = run_in_host(['inspect', cid])
+        if insp.returncode != 0:
             continue
+        obj = json.loads(insp.stdout)
+        ref = obj.get("status", {}).get("imageRef")
+        if ref:
+            used.add(ref)
     logger.info(f"Identified {len(used)} used images")
     return used
 
 def get_all_images() -> list[str]:
     img = run_in_host(['images', '-q'])
     if img.returncode != 0:
-        print("crictl images failed:", img.stderr)
+        logger.error(f"crictl images failed: {img.stderr}")
         return []
     return img.stdout.strip().splitlines()
 
@@ -134,7 +116,7 @@ def get_image_created(img_id: str) -> datetime | None:
     """
     insp = run_in_host(['inspect', img_id])
     if insp.returncode != 0:
-        print(f"inspect failed for {img_id}:", insp.stderr)
+        logger.error(f"Inspect failed for image {img_id}: {insp.stderr}")
         return None
     try:
         data = json.loads(insp.stdout)
@@ -184,52 +166,41 @@ def run_prune(days: int = 14):
     images_pruned = 0
     errors = 0
     
-    try:
-        with image_lock:
-            logger.debug(f"Lock acquired for pruning operation with {days} days threshold")
-            now = datetime.now(timezone.utc)
-            cutoff_seconds = days * 24 * 60 * 60
+    with image_lock:
+        logger.debug(f"Lock acquired for pruning operation with {days} days threshold")
+        now = datetime.now(timezone.utc)
+        cutoff_seconds = days * 24 * 60 * 60
 
-            used_images = get_used_images()
-            all_images = get_all_images()
-            logger.info(f"Found {len(all_images)} total images, {len(used_images)} in use")
+        used_images = get_used_images()
+        all_images = get_all_images()
+        logger.info(f"Found {len(all_images)} total images, {len(used_images)} in use")
 
-            for img in all_images:
-                try:
-                    logger.debug(f"Processing image: {img}")
-                    created_dt = get_image_created(img)
-                    if not created_dt:
-                        logger.warning(f"Could not determine creation time for image: {img}")
-                        continue
+        for img in all_images:
+            logger.debug(f"Processing image: {img}")
+            created_dt = get_image_created(img)
+            if not created_dt:
+                logger.warning(f"Could not determine creation time for image: {img}")
+                continue
 
-                    age_seconds = (now - created_dt).total_seconds()
-                    if age_seconds < cutoff_seconds:
-                        logger.debug(f"Image {img} is too new ({age_seconds/86400:.1f} days < {days} days), skipping")
-                        continue
+            age_seconds = (now - created_dt).total_seconds()
+            if age_seconds < cutoff_seconds:
+                logger.debug(f"Image {img} is too new ({age_seconds/86400:.1f} days < {days} days), skipping")
+                continue
 
-                    # If the image id/digest string appears in used images, skip
-                    if img in used_images:
-                        logger.debug(f"Skipping used image: {img}")
-                        continue
+            if img in used_images:
+                logger.debug(f"Skipping used image: {img}")
+                continue
 
-                    logger.debug(f"Attempting to prune image {img}, age={age_seconds/86400:.1f} days")
-                    print(f"Pruning image {img}, age={age_seconds/86400:.1f} days")
-                    r = run_in_host(['rmi', img])
-                    if r.returncode != 0:
-                        logger.error(f"Failed to remove image {img}: Command returned code {r.returncode}, stderr: {r.stderr}")
-                        print(f"Failed to remove {img}: {r.stderr}")
-                        errors += 1
-                    else:
-                        logger.info(f"Successfully pruned image: {img}")
-                        images_pruned += 1
-                except RuntimeError as e:
-                    logger.error(f"Error processing image {img}: {str(e)}")
-                    errors += 1
+            logger.debug(f"Attempting to prune image {img}, age={age_seconds/86400:.1f} days")
+            r = run_in_host(['rmi', img])
+            if r.returncode != 0:
+                logger.error(f"Failed to remove image {img}: Command returned code {r.returncode}, stderr: {r.stderr}")
+                errors += 1
+            else:
+                logger.info(f"Successfully pruned image: {img}")
+                images_pruned += 1
 
-        logger.info(f"Pruning operation completed. Removed {images_pruned} images, {errors} errors")
-    except Exception as e:
-        logger.error(f"Fatal error during pruning: {str(e)}\n{traceback.format_exc()}")
-        raise
+    logger.info(f"Pruning operation completed. Removed {images_pruned} images, {errors} errors")
 
 # Configure FastAPI app
 app = FastAPI(
