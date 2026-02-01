@@ -139,7 +139,9 @@ def run_pull(image: str):
                     # Try to get image creation time for logging
                     created_time = get_image_created(image)
                     if created_time:
-                        logger.info(f"  Image creation time: {created_time.isoformat()}")
+                        logger.debug(f"  Image creation time: {created_time.isoformat()}")
+                    else:
+                        logger.warning("Image creation time missing")
                 else:
                     logger.error(f"Failed to pull image {image}: Command returned code {result.returncode}, stderr: {result.stderr}")
             else:
