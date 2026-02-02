@@ -252,10 +252,10 @@ def run_in_host(cmd):
     try:
         result = subprocess.run(full_cmd, check=False, capture_output=True, text=True)
         logger.debug(f"Command completed with return code {result.returncode}")
-        if result.stderr:
-            logger.debug(f"Command stderr: {result.stderr}")
-        if result.stdout:
-            logger.debug(f"Command stdout: {result.stdout}")
+        #if result.stderr:
+        #    logger.debug(f"Command stderr: {result.stderr}")
+        #if result.stdout:
+        #    logger.debug(f"Command stdout: {result.stdout}")
         return result
     except Exception as e:
         logger.debug(f"Error executing command {' '.join(cmd)}: {str(e)}")
